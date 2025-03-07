@@ -13,4 +13,4 @@ COPY . .
 RUN mkdir -p db
 
 # Command to run the bot
-CMD ["python", "bot.py"]
+CMD ["python", "standup-bot.py"]

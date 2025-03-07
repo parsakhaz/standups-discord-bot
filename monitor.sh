@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# Simple script to monitor bot.py and restart if not running
+# Simple script to monitor standup-bot.py and restart if not running
 # Sends notifications via ntfy.sh when bot is down
 
 # Set your ntfy.sh topic from environment or use default
-NTFY_TOPIC="${NTFY_TOPIC:-standup-bot-alerts}"
+NTFY_TOPIC="${NTFY_TOPIC:md-standup-bot-alerts}"
 
 # Initialize counter for consecutive failures
 failures=0
 
 while true; do
-  if ! pgrep -f "python bot.py" > /dev/null; then
+  if ! pgrep -f "python standup-bot.py" > /dev/null; then
     # Increment failure counter
     ((failures++))
     
@@ -19,7 +19,7 @@ while true; do
     
     # Restart the bot
     cd "$(dirname "$0")" # Change to script directory
-    python bot.py &      # Start bot in background
+    python standup-bot.py &      # Start bot in background
     
     # Send notification via ntfy.sh
     curl -H "Title: Standup Bot Down Alert" \
@@ -31,7 +31,7 @@ while true; do
     sleep 5  # Wait to ensure bot started properly
     
     # Check if restart was successful
-    if ! pgrep -f "python bot.py" > /dev/null; then
+    if ! pgrep -f "python standup-bot.py" > /dev/null; then
       # Send critical notification if restart failed
       curl -H "Title: CRITICAL: Standup Bot Restart Failed" \
            -H "Priority: urgent" \

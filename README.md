@@ -88,7 +88,7 @@ https://discord.com/oauth2/authorize?client_id=1347472081788342324&permissions=3
 ## Starting the Bot
 
 ```bash
-python bot.py
+python standup-bot.py
 ```
 
 ## Docker Setup (Alternative)

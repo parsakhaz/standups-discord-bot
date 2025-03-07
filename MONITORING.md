@@ -59,7 +59,7 @@ You should see the script running.
 Test that notifications are working by temporarily stopping the bot:
 
 ```bash
-pkill -f "python bot.py"
+pkill -f "python standup-bot.py"
 ```
 
 You should receive a notification within 15 seconds, and another notification when the bot restarts.
@@ -93,7 +93,7 @@ After=network.target
 Type=simple
 User=YOUR_USERNAME
 WorkingDirectory=/path/to/standup-bot
-ExecStart=/usr/bin/python3 bot.py
+ExecStart=/usr/bin/python3 standup-bot.py
 Restart=always
 RestartSec=10
 
@@ -146,10 +146,10 @@ sudo systemctl status standup-bot-monitor.service
 
 ## Troubleshooting
 
-- If the script isn't detecting the bot, check that the bot process name matches exactly "python bot.py"
+- If the script isn't detecting the bot, check that the bot process name matches exactly "python standup-bot.py"
 - Make sure curl is installed: `apt-get install curl` (on Ubuntu/Debian)
 - Ensure the server has internet access to reach ntfy.sh
-- Check that the monitor script and bot.py are in the same directory
+- Check that the monitor script and standup-bot.py are in the same directory
 - Verify that Discord token and other environment variables are correctly set
 
 ## Additional Notes
