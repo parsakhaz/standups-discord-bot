@@ -4,6 +4,7 @@ A Discord bot that manages daily standup meetings, automatically creating thread
 
 ## Features
 
+- **Early Thread Creation**: Threads are created after midnight, separate from reminders
 - **Daily Reminders**: Automatic notifications at configurable times to remind team members about standups
 - **Thread Management**: Creates daily standup threads with proper naming (MM/DD/YYYY)
 - **Follow-up Reminders**: Mentions users who haven't submitted updates by the deadline
@@ -121,8 +122,10 @@ docker run -d --name standup-bot \
 | `/set-deadline <time>` | Set deadline and followup time | `/set-deadline 11:00` |
 | `/set-timezone <tz>` | Set the timezone for the bot | `/set-timezone America/New_York` |
 | `/set-standup-format <format>` | Set the standup template | `/set-standup-format **Yesterday:**\n- \n\n**Today:**\n- ` |
+| `/refresh-thread` | Refresh the bot's reference to today's thread | `/refresh-thread` |
 | `/test-reminder` | Test the reminder feature (admin) | `/test-reminder` |
 | `/test-followup` | Test the followup feature (admin) | `/test-followup` |
+| `/sync` | Sync slash commands with Discord (admin) | `/sync` |
 
 ### Workflow
 
@@ -131,8 +134,8 @@ docker run -d --name standup-bot \
    - Add team members to the notification list
 
 2. **Daily Operation**:
+   - Bot creates a thread for the day shortly after midnight
    - Bot sends reminder at configured time (default: 10:30 AM)
-   - Bot creates a thread with today's date
    - Team members post updates in the thread
    - Bot sends followup at deadline time (default: 11:00 AM)
 
@@ -152,8 +155,9 @@ The bot stores configuration in JSON files:
 - `db/users.json` - List of users to notify
 
 Default settings:
-- Reminder time: 10:30 AM local time
-- Deadline time: 11:00 AM local time
+- Thread creation: After midnight, checked every 15 minutes
+- Reminder time: 10:30 AM local time (24-hour format)
+- Deadline time: 11:00 AM local time (24-hour format)
 - Timezone: America/Los_Angeles
 - Weekdays only: Yes
 
@@ -213,3 +217,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 [MIT License](LICENSE)
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for a detailed list of changes in each version.
