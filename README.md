@@ -1,12 +1,10 @@
 # Standup Discord Bot
 
-A Discord bot that manages daily standup meetings, automatically creating threads and sending reminders to team members.
+A Discord bot that manages daily standup meetings in a dedicated channel, sending reminders and tracking responses.
 
 ## Features
 
-- **Early Thread Creation**: Threads are created after midnight, separate from reminders
 - **Daily Reminders**: Automatic notifications at configurable times to remind team members about standups
-- **Thread Management**: Creates daily standup threads with proper naming (MM/DD/YYYY)
 - **Follow-up Reminders**: Mentions users who haven't submitted updates by the deadline
 - **User Management**: Commands to add and remove users from the notification list
 - **Flexible Configuration**: Customizable reminder times, deadlines, and timezone settings
@@ -78,9 +76,6 @@ NTFY_TOPIC=your_ntfy_topic_here
 4. Generate an invite link with the following permissions:
    - Read Messages/View Channels
    - Send Messages
-   - Create Public Threads
-   - Send Messages in Threads
-   - Manage Threads
    - Manage Messages
    - Read Message History
 5. Invite the bot to your server using the generated link
@@ -122,8 +117,8 @@ docker run -d --name standup-bot \
 | `/set-deadline <time>` | Set deadline and followup time | `/set-deadline 11:00` |
 | `/set-timezone <tz>` | Set the timezone for the bot | `/set-timezone America/New_York` |
 | `/set-standup-format <format>` | Set the standup template | `/set-standup-format **Yesterday:**\n- \n\n**Today:**\n- ` |
-| `/refresh-thread` | Refresh the bot's reference to today's thread | `/refresh-thread` |
 | `/test-reminder` | Test the reminder feature (admin) | `/test-reminder` |
+| `/test-second-reminder` | Test the second reminder feature (admin) | `/test-second-reminder` |
 | `/test-followup` | Test the followup feature (admin) | `/test-followup` |
 | `/sync` | Sync slash commands with Discord (admin) | `/sync` |
 
@@ -134,10 +129,10 @@ docker run -d --name standup-bot \
    - Add team members to the notification list
 
 2. **Daily Operation**:
-   - Bot creates a thread for the day shortly after midnight
-   - Bot sends reminder at configured time (default: 10:30 AM)
-   - Team members post updates in the thread
-   - Bot sends followup at deadline time (default: 11:00 AM)
+   - Bot sends standup reminder at configured time (default: 9:30 AM) with template
+   - Bot sends a second reminder at 10:15 AM to users who haven't responded yet
+   - Team members post updates in the channel
+   - Bot sends final followup at deadline time (default: 11:00 AM)
 
 3. **Reporting**:
    - Generate daily or weekly recaps as needed
@@ -155,8 +150,8 @@ The bot stores configuration in JSON files:
 - `db/users.json` - List of users to notify
 
 Default settings:
-- Thread creation: After midnight, checked every 15 minutes
-- Reminder time: 10:30 AM local time (24-hour format)
+- First reminder time: 9:30 AM local time (24-hour format)
+- Second reminder time: 10:15 AM local time (fixed)
 - Deadline time: 11:00 AM local time (24-hour format)
 - Timezone: America/Los_Angeles
 - Weekdays only: Yes

@@ -50,7 +50,7 @@ def load_config():
     except FileNotFoundError:
         # Default configuration
         config = {
-            'reminder_time': '10:30',  # 10:30 AM in 24-hour format
+            'reminder_time': '09:30',  # 9:30 AM in 24-hour format
             'deadline_time': '11:00',  # 11:00 AM in 24-hour format
             'timezone': 'America/Los_Angeles',
             'weekdays_only': True,
@@ -83,7 +83,6 @@ scheduler = AsyncIOScheduler()
 config = load_config()
 standup_users = load_users()
 today_responses = {}  # Track responses for the day
-today_thread = None   # Keep track of today's thread
 
 @bot.event
 async def on_ready():
@@ -110,19 +109,19 @@ def setup_scheduler():
     reminder_hour, reminder_minute = map(int, config['reminder_time'].split(':'))
     deadline_hour, deadline_minute = map(int, config['deadline_time'].split(':'))
     
-    # Schedule thread creation check (runs every 15 minutes after midnight)
-    scheduler.add_job(
-        create_standup_thread_if_needed,
-        CronTrigger(hour='0-23', minute='*/15', day_of_week='mon-fri' if config['weekdays_only'] else '*', timezone=tz),
-        id='thread_creation_check',
-        replace_existing=True
-    )
-    
     # Schedule initial reminder
     scheduler.add_job(
         send_standup_reminder,
         CronTrigger(hour=reminder_hour, minute=reminder_minute, day_of_week='mon-fri' if config['weekdays_only'] else '*', timezone=tz),
         id='standup_reminder',
+        replace_existing=True
+    )
+    
+    # Schedule second reminder at 10:15 AM
+    scheduler.add_job(
+        send_second_reminder,
+        CronTrigger(hour=10, minute=15, day_of_week='mon-fri' if config['weekdays_only'] else '*', timezone=tz),
+        id='second_reminder',
         replace_existing=True
     )
     
@@ -142,72 +141,21 @@ def setup_scheduler():
         replace_existing=True
     )
     
-    logger.info(f"Scheduled thread creation checks every 15 minutes")
-    logger.info(f"Scheduled reminders at {config['reminder_time']} AM and follow-ups at {config['deadline_time']} AM {config['timezone']}")
+    logger.info(f"Scheduled first reminder at {config['reminder_time']} AM, second reminder at 10:15 AM, and follow-ups at {config['deadline_time']} AM {config['timezone']}")
 
-async def create_standup_thread_if_needed():
-    """Create a thread for today's standup if it doesn't exist yet"""
-    global today_thread
-    
-    try:
-        # Skip if we already have today's thread
-        if today_thread and today_thread.created_at.date() == datetime.datetime.now().date():
-            return
-            
-        # Get the channel
-        channel = bot.get_channel(STANDUP_CHANNEL_ID)
-        if not channel:
-            logger.error(f"Could not find channel with ID {STANDUP_CHANNEL_ID}")
-            return
-        
-        # Create today's date string
-        today_str = datetime.datetime.now().strftime("%m/%d/%Y")
-        
-        # Check if a thread already exists for today
-        existing_thread = None
-        
-        # Check active threads
-        for thread_channel in channel.threads:
-            if today_str in thread_channel.name:
-                existing_thread = thread_channel
-                break
-                
-        if not existing_thread:
-            # Check archived threads
-            async for thread_channel in channel.archived_threads(limit=5):
-                if today_str in thread_channel.name:
-                    existing_thread = thread_channel
-                    break
-        
-        if existing_thread:
-            today_thread = existing_thread
-            logger.info(f"Found existing standup thread for {today_str}")
-            return
-        
-        # If no thread exists, create a new one
-        message = await channel.send(f"📝 **Daily Standup Thread for {today_str}**")
-        thread = await message.create_thread(name=f"{today_str} Standup")
-        
-        # Post template in thread
-        await thread.send(f"**Standup Template:**\n\n{config['standup_format']}\n\n*Reply in this thread with your update!*")
-        
-        # Store the thread reference
-        today_thread = thread
-        
-        logger.info(f"Created standup thread for {today_str}")
-        
-    except Exception as e:
-        logger.error(f"Error creating standup thread: {e}")
+async def ensure_standup_channel():
+    """Verify the standup channel exists and return it"""
+    channel = bot.get_channel(STANDUP_CHANNEL_ID)
+    if not channel:
+        logger.error(f"Could not find channel with ID {STANDUP_CHANNEL_ID}")
+    return channel
 
 async def send_standup_reminder():
-    """Send the standup reminder in today's thread"""
+    """Send the standup reminder in the standups channel"""
     try:
-        # Get today's thread by calling the creation function
-        # This ensures the thread exists before sending the reminder
-        await create_standup_thread_if_needed()
-        
-        if not today_thread:
-            logger.error("Could not find or create today's thread")
+        # Get the standup channel
+        channel = await ensure_standup_channel()
+        if not channel:
             return
             
         # Reset today's responses for the new day
@@ -231,8 +179,11 @@ async def send_standup_reminder():
                 
         mention_str = " ".join(mentions) if mentions else "everyone"
         
-        # Send reminder message in the thread
-        await today_thread.send(f"🔔 **Good morning {mention_str}!** Please fill in your standups before {config['deadline_time']} AM!")
+        # Create today's date string
+        today_str = datetime.datetime.now().strftime("%m/%d/%Y")
+        
+        # Send reminder message in the channel
+        await channel.send(f"📝 **Daily Standup for {today_str}**\n\n🔔 **Good morning {mention_str}!** Please fill in your standups before {config['deadline_time']} AM!\n\n**Standup Template:**\n\n{config['standup_format']}\n\n*Reply with your update starting with \"Standup:\"*")
         
         logger.info(f"Sent standup reminder to {len(mentions)} users")
         
@@ -242,11 +193,9 @@ async def send_standup_reminder():
 async def send_followup_notification():
     """Send follow-up notification mentioning users who haven't responded"""
     try:
-        # Make sure we have today's thread
-        await create_standup_thread_if_needed()
-        
-        if not today_thread:
-            logger.error("Could not find or create today's thread")
+        # Get the standup channel
+        channel = await ensure_standup_channel()
+        if not channel:
             return
         
         # Get guild to fetch members
@@ -273,21 +222,58 @@ async def send_followup_notification():
             mentions = " ".join([member.mention for member in missing_users])
             
             # Send follow-up message
-            await today_thread.send(f"⏰ **Reminder!** The following team members still need to submit their standups: {mentions}")
+            await channel.send(f"⏰ **Reminder!** The following team members still need to submit their standups: {mentions}")
             logger.info(f"Sent follow-up notification to {len(missing_users)} users")
         else:
-            await today_thread.send("✅ Great job team! Everyone has submitted their standup for today!")
+            await channel.send("✅ Great job team! Everyone has submitted their standup for today!")
             logger.info("All users have submitted their standups")
             
     except Exception as e:
         logger.error(f"Error sending follow-up notification: {e}")
 
+async def send_second_reminder():
+    """Send a second reminder to users who haven't responded yet"""
+    try:
+        # Get the standup channel
+        channel = await ensure_standup_channel()
+        if not channel:
+            return
+        
+        # Get guild to fetch members
+        guild = bot.get_guild(GUILD_ID)
+        if not guild:
+            logger.error(f"Could not find guild with ID {GUILD_ID}")
+            return
+            
+        # Get members who haven't responded
+        missing_users = []
+        for user_id in standup_users:
+            if user_id not in today_responses:
+                try:
+                    member = await guild.fetch_member(int(user_id))
+                    if member:
+                        missing_users.append(member)
+                except discord.NotFound:
+                    logger.warning(f"User ID {user_id} not found in the server")
+                except Exception as e:
+                    logger.error(f"Error fetching member {user_id}: {e}")
+        
+        if missing_users:
+            # Create mention string
+            mentions = " ".join([member.mention for member in missing_users])
+            
+            # Send second reminder message
+            await channel.send(f"⏰ **Second Reminder!** The following team members still need to submit their standups (due by 11:00 AM): {mentions}")
+            logger.info(f"Sent second reminder to {len(missing_users)} users")
+            
+    except Exception as e:
+        logger.error(f"Error sending second reminder: {e}")
+
 def reset_daily_tracking():
     """Reset tracking of responses for a new day"""
-    global today_responses, today_thread
+    global today_responses
     today_responses = {}
-    today_thread = None
-    logger.info("Reset daily tracking of standup responses and thread reference")
+    logger.info("Reset daily tracking of standup responses")
 
 @bot.tree.command(name="notify", description="Add a user to the standup notification list")
 async def notify_command(interaction: discord.Interaction, user: discord.Member):
@@ -433,36 +419,21 @@ async def daily_recap_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
     
     try:
-        # Get today's thread
+        # Get the standup channel
         channel = bot.get_channel(STANDUP_CHANNEL_ID)
         if not channel:
             await interaction.followup.send("Could not find the standup channel.")
             return
             
-        today_str = datetime.datetime.now().strftime("%m/%d/%Y")
-        thread = None
+        # Get today's date
+        today = datetime.datetime.now(pytz.timezone(config['timezone'])).date()
+        today_start = datetime.datetime.combine(today, datetime.time.min, tzinfo=pytz.timezone(config['timezone']))
+        today_end = datetime.datetime.combine(today, datetime.time.max, tzinfo=pytz.timezone(config['timezone']))
         
-        # Find the thread for today
-        async for thread_channel in channel.archived_threads(limit=5):
-            if today_str in thread_channel.name:
-                thread = thread_channel
-                break
-                
-        if not thread:
-            # Check active threads
-            for thread_channel in channel.threads:
-                if today_str in thread_channel.name:
-                    thread = thread_channel
-                    break
-        
-        if not thread:
-            await interaction.followup.send("Could not find today's standup thread.")
-            return
-        
-        # Get all messages from the thread
+        # Get all messages from the standup channel for today
         messages = []
-        async for message in thread.history(limit=100):
-            if message.author != bot.user and not message.content.startswith("**Standup Template:**"):
+        async for message in channel.history(limit=200, after=today_start, before=today_end):
+            if message.author != bot.user:  # Include all user messages, not just those with "Standup:" prefix
                 messages.append(message)
         
         if not messages:
@@ -470,6 +441,7 @@ async def daily_recap_command(interaction: discord.Interaction):
             return
         
         # Build the recap
+        today_str = today.strftime("%m/%d/%Y")
         recap = f"# Standup Recap for {today_str}\n\n"
         
         for message in reversed(messages):  # Oldest first
@@ -508,50 +480,35 @@ async def weekly_recap_command(interaction: discord.Interaction):
             return
         
         # Calculate date range for this week (Monday to today)
-        today = datetime.datetime.now()
+        current_tz = pytz.timezone(config['timezone'])
+        today = datetime.datetime.now(current_tz)
         start_of_week = today - datetime.timedelta(days=today.weekday())
-        date_range = []
+        start_of_week = datetime.datetime.combine(start_of_week.date(), datetime.time.min, tzinfo=current_tz)
         
-        # Generate all dates this week up to today
-        current_date = start_of_week
-        while current_date <= today:
-            date_range.append(current_date.strftime("%m/%d/%Y"))
-            current_date += datetime.timedelta(days=1)
+        # Get all messages from the standup channel for this week
+        messages_by_date = {}
         
-        # Initialize recap
+        async for message in channel.history(limit=1000, after=start_of_week):
+            if message.author != bot.user:  # Include all user messages, not just those with "Standup:" prefix
+                msg_date = message.created_at.astimezone(current_tz)
+                date_str = msg_date.strftime("%m/%d/%Y")
+                
+                if date_str not in messages_by_date:
+                    messages_by_date[date_str] = []
+                    
+                messages_by_date[date_str].append(message)
+        
+        if not messages_by_date:
+            await interaction.followup.send("No standup updates were found for this week.")
+            return
+        
+        # Build the recap
         recap = "# Weekly Standup Recap\n\n"
         total_updates = 0
         
         # Process each day
-        for date_str in date_range:
-            thread = None
-            
-            # Find the thread for this date
-            async for thread_channel in channel.archived_threads(limit=20):
-                if date_str in thread_channel.name:
-                    thread = thread_channel
-                    break
-                    
-            if not thread:
-                # Check active threads
-                for thread_channel in channel.threads:
-                    if date_str in thread_channel.name:
-                        thread = thread_channel
-                        break
-            
-            if not thread:
-                recap += f"## {date_str}\nNo standups found for this day.\n\n"
-                continue
-            
-            # Get messages for this day
-            day_messages = []
-            async for message in thread.history(limit=100):
-                if message.author != bot.user and not message.content.startswith("**Standup Template:**"):
-                    day_messages.append(message)
-            
-            if not day_messages:
-                recap += f"## {date_str}\nNo standup updates were submitted.\n\n"
-                continue
+        for date_str in sorted(messages_by_date.keys()):
+            day_messages = messages_by_date[date_str]
             
             # Add day header
             recap += f"## {date_str} ({len(day_messages)} updates)\n\n"
@@ -628,13 +585,29 @@ async def test_followup_command(interaction: discord.Interaction):
         logger.error(f"Error sending test followup: {e}")
         await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
 
-@bot.tree.command(name="sync", description="Sync slash commands to the server (admin only)")
-async def sync_command(interaction: discord.Interaction):
-    """Sync slash commands with Discord"""
+@bot.tree.command(name="test-second-reminder", description="Test the second reminder notification (admin only)")
+async def test_second_reminder_command(interaction: discord.Interaction):
+    """Test the second reminder functionality"""
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("This command is for administrators only.", ephemeral=True)
         return
     
+    await interaction.response.send_message("Sending a test second reminder...", ephemeral=True)
+    
+    try:
+        await send_second_reminder()
+        logger.info("Test second reminder sent successfully")
+    except Exception as e:
+        logger.error(f"Error sending test second reminder: {e}")
+        await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="sync", description="Sync slash commands to the server (admin only)")
+async def sync_command(interaction: discord.Interaction):
+    """Sync slash commands with the server"""
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You must be an administrator to use this command.", ephemeral=True)
+        return
+        
     await interaction.response.defer(ephemeral=True)
     
     try:
@@ -645,58 +618,23 @@ async def sync_command(interaction: discord.Interaction):
         await interaction.followup.send(f"Failed to sync commands: {str(e)}", ephemeral=True)
         logger.error(f"Failed to sync commands: {e}")
 
-@bot.tree.command(name="refresh-thread", description="Refresh the bot's reference to today's thread")
-async def refresh_thread_command(interaction: discord.Interaction):
-    """Manually refresh the bot's reference to today's thread"""
-    try:
-        # First, respond to the interaction to avoid timeout
-        await interaction.response.defer(ephemeral=True)
-        
-        # Reset the thread reference
-        global today_thread
-        today_thread = None
-        
-        # Try to create or find today's thread
-        await create_standup_thread_if_needed()
-        
-        if today_thread:
-            await interaction.followup.send(f"✅ Successfully refreshed the thread reference for today.", ephemeral=True)
-            logger.info(f"Thread reference manually refreshed by {interaction.user}")
-        else:
-            await interaction.followup.send(f"❌ Failed to find or create today's thread.", ephemeral=True)
-            logger.error(f"Failed to refresh thread reference (triggered by {interaction.user})")
-            
-    except Exception as e:
-        await interaction.followup.send(f"❌ Error refreshing thread: {str(e)}", ephemeral=True)
-        logger.error(f"Error in refresh-thread command: {e}")
-
 @bot.event
 async def on_message(message):
     # Ignore bot messages
     if message.author.bot:
         return
     
-    # Check if message is in a standup thread
-    if isinstance(message.channel, discord.Thread):
-        # Get today's date string
-        today_str = datetime.datetime.now().strftime("%m/%d/%Y")
+    # Check if message is in the standup channel (track all messages, not just those with "Standup:" prefix)
+    if message.channel.id == STANDUP_CHANNEL_ID:
+        # Mark this user as having responded
+        today_responses[str(message.author.id)] = {
+            'timestamp': datetime.datetime.now().timestamp(),
+            'content': message.content
+        }
+        logger.info(f"Recorded standup update from {message.author.display_name}")
         
-        # Check if it's in today's thread (either by matching our reference or by name)
-        is_today_thread = (
-            (today_thread and message.channel.id == today_thread.id) or
-            (today_str in message.channel.name and message.channel.parent_id == STANDUP_CHANNEL_ID)
-        )
-        
-        if is_today_thread:
-            # Mark this user as having responded
-            today_responses[str(message.author.id)] = {
-                'timestamp': datetime.datetime.now().timestamp(),
-                'content': message.content
-            }
-            logger.info(f"Recorded standup update from {message.author.display_name}")
-            
-            # Add a reaction to acknowledge
-            await message.add_reaction("✅")
+        # Add a reaction to acknowledge
+        await message.add_reaction("✅")
 
 # Run the bot
 if __name__ == "__main__":
